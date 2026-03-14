@@ -1,8 +1,0 @@
-{
-  "version": 2,
-  "functions": {
-    "api/*.js": {
-      "node": "20.x"
-    }
-  }
-}
