@@ -3,7 +3,7 @@
 
 import crypto from "crypto";
 
-const LINE_FORWARD_TIMEOUT_MS = 9000; // LINE ต้องการ response < 10s
+const LINE_FORWARD_TIMEOUT_MS = 25000;// LINE ต้องการ response < 10s
 
 function verifyLineSignature(bodyText, signature, channelSecret) {
   if (!signature || !channelSecret) return false;
