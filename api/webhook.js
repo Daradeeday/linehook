@@ -1,9 +1,9 @@
 // api/webhook.js  –  LINE → Apps Script forwarder
-// v3: รองรับ GET (LINE verify), timeout 55s, fire-and-forget
+// v4: await GAS ก่อนตอบ LINE (fix Vercel Hobby plan terminate issue)
 
 import crypto from "crypto";
 
-const LINE_FORWARD_TIMEOUT_MS = 55000;
+const GAS_TIMEOUT_MS = 8000; // ต้องตอบ LINE ภายใน 10s รวม overhead
 
 function verifyLineSignature(bodyText, signature, channelSecret) {
   if (!signature || !channelSecret) return false;
@@ -15,7 +15,6 @@ function verifyLineSignature(bodyText, signature, channelSecret) {
 }
 
 export default async function handler(req, res) {
-  // LINE ส่ง GET มาตอน Verify webhook → ตอบ 200 ทันที
   if (req.method === "GET") {
     return res.status(200).send("OK");
   }
@@ -48,19 +47,18 @@ export default async function handler(req, res) {
     return res.status(400).send("Invalid JSON");
   }
 
-  // LINE verify ping (events ว่าง) → ตอบ 200 ทันที
+  // LINE verify ping → ตอบ 200 ทันที
   if (!body || !Array.isArray(body.events) || body.events.length === 0) {
     return res.status(200).send("OK");
   }
 
-  // ตอบ 200 ให้ LINE ก่อนเสมอ แล้วค่อย forward GAS
-  res.status(200).send("OK");
-
+  // await GAS ก่อน แล้วค่อยตอบ LINE
+  // Vercel Hobby plan terminate หลัง res.send() ทำให้ fire-and-forget ไม่ทำงาน
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LINE_FORWARD_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS);
 
   try {
-    const gasRes = await fetch(appsScriptUrl, {
+    await fetch(appsScriptUrl, {
       method: "POST",
       headers: {
         "Content-Type":  "application/json",
@@ -70,21 +68,17 @@ export default async function handler(req, res) {
       body:   bodyText,
       signal: controller.signal,
     });
-
-    if (!gasRes.ok) {
-      const errText = await gasRes.text().catch(() => "");
-      console.error("[webhook] GAS returned", gasRes.status, errText.slice(0, 200));
-    } else {
-      console.log("[webhook] GAS forwarded OK events=" + body.events.length);
-    }
-
+    console.log("[webhook] GAS forwarded OK events=" + body.events.length);
   } catch (err) {
     if (err.name === "AbortError") {
-      console.error("[webhook] GAS timeout after", LINE_FORWARD_TIMEOUT_MS, "ms");
+      console.warn("[webhook] GAS slow (>8s) but continuing");
     } else {
       console.error("[webhook] Forward error:", err.message);
     }
   } finally {
     clearTimeout(timer);
   }
+
+  // ตอบ LINE หลัง GAS เสร็จ (หรือ timeout)
+  return res.status(200).send("OK");
 }
